@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # 小黄鱼数据工坊 金价监控 - GitHub Actions 版
 # 微信推送: Server酱 (Secrets: SERVERCHAN_KEY)  令牌: Secrets: GOLD_TOKEN
-import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, os
+import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.error, os, sys
 
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
@@ -41,11 +41,22 @@ SHOW = [("ICBC","工商银行","5g"),("CCB","建设银行","5g"),("BCM","交通�
         ("FX678","伦敦黄金",None),("FX678","纽约黄金12",None)]
 
 def main():
-    d = call_api("/api/miniprogram/latest")["data"]
+    # 令牌过期检测：拉不到数据时用Server酱提醒换令牌（不占用金价播报额度以外太多）
+    try:
+        raw = call_api("/api/miniprogram/latest")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            serverchan("🔴 金价监控令牌过期", "接口返回 %d，需要重新用 Fiddler 抓包换新令牌，否则监控已停摆。" % e.code)
+            sys.exit(1)
+        raise
+    d = raw["data"]
     prev = {}
+    state = {}
     if os.path.exists(STATE):
-        try: prev = json.load(open(STATE)).get("prices", {})
+        try: state = json.load(open(STATE))
         except Exception: pass
+    prev = state.get("prices", {})
+    data_time = d.get("时间", "")
     prices = d.get("价格", {})
     cur, rows, md = {}, [], []
     for code, cname, spec in SHOW:
@@ -65,27 +76,36 @@ def main():
         md.append(f"{label}: **{v:.2f}** 元/克{delta}")
     diff = d.get("价差", {})
     diff_txt = ", ".join(f"{k.replace('_SGE','')} +{v:.2f}" for k, v in diff.items())
-    json.dump({"ts": time.time(), "prices": cur}, open(STATE, "w"))
+    state.update({"ts": time.time(), "prices": cur, "data_time": data_time, "below": any_below})
+    json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
     print(f"数据时间 {d.get('时间','')}")
     for label, v, delta, _ in rows:
         print(f"{label}: {v:.2f} {delta}")
 
-    # 跌破阈值检测：任一银行小金条价格跌破 THRESHOLD 即提醒
+    # 跌破阈值检测：只在“跌破”或“收复”的瞬间提醒，避免每小时重复打扰
     alerts = []
-    for label, v in cur.items():
-        if label.startswith(("工商","建设","交通","招商")) and v < THRESHOLD:
-            alerts.append(f"⚠️ {label} 现价 **{v:.2f}** 元/克，已跌破 {THRESHOLD:.0f} 元/克！")
+    any_below = any(v < THRESHOLD for l, v in cur.items() if l.startswith(("工商","建设","交通","招商")))
+    was_below = state.get("below", False)
+    if any_below and not was_below:
+        for label, v in cur.items():
+            if label.startswith(("工商","建设","交通","招商")) and v < THRESHOLD:
+                alerts.append(f"⚠️ {label} 现价 **{v:.2f}** 元/克，已跌破 {THRESHOLD:.0f} 元/克！")
+    elif was_below and not any_below:
+        alerts.append(f"✅ 银行小金条价格已收复 {THRESHOLD:.0f} 元/克。")
 
-    # 微信推送：每小时例行播报 + 阈值提醒
+    # 微信推送：数据有更新才播报；跌破/收复提醒始终发送
     if SCT_KEY:
-        body_md = f"### 小黄鱼金价监控\n\n数据时间 {d.get('时间','')}\n\n" + "\n\n".join(md)
-        if diff_txt: body_md += f"\n\n溢价(vs上金所)：{diff_txt}"
-        if alerts:
-            body_md = "\n\n".join(alerts) + "\n\n---\n\n" + body_md
-            serverchan("⚠️ 金价跌破900提醒", body_md)
+        if data_time and data_time == state.get("data_time") and not alerts:
+            print("数据无更新（休市），跳过本次播报")
         else:
-            serverchan("金价播报 " + time.strftime("%m-%d %H:%M"), body_md)
+            body_md = f"### 小黄鱼金价监控\n\n数据时间 {data_time}\n\n" + "\n\n".join(md)
+            if diff_txt: body_md += f"\n\n溢价(vs上金所)：{diff_txt}"
+            if alerts:
+                body_md = "\n\n".join(alerts) + "\n\n---\n\n" + body_md
+                serverchan("⚠️ 金价跌破900提醒", body_md)
+            else:
+                serverchan("金价播报 " + time.strftime("%m-%d %H:%M"), body_md)
 
     # 网页报告
     trs = "\n".join(
@@ -108,6 +128,7 @@ def main():
                     + "<br>".join(alerts) + "</div>") if alerts else ""
     html = f"""<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="600">
 <title>小黄鱼金价监控</title><style>
 body{{font-family:-apple-system,"Microsoft YaHei",sans-serif;background:#111;color:#eee;margin:0;padding:24px}}
 h1{{font-size:20px;margin:0 0 4px}}.time{{color:#888;font-size:13px;margin-bottom:16px}}
