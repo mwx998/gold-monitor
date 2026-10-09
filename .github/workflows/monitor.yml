@@ -1,7 +1,7 @@
 name: gold-monitor
 on:
   schedule:
-    - cron: '0 * * * *'   # 每30分钟一次
+    - cron: '*/30 * * * *'   # 每30分钟一次
   workflow_dispatch:          # 支持手动触发
 permissions:
   contents: write
@@ -15,6 +15,7 @@ jobs:
       - name: Fetch prices
         env:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python gold_monitor.py
       - name: Commit state & report
         run: |
