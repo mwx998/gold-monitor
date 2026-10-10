@@ -5,7 +5,7 @@ import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.
 
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
-THRESHOLD = 900.0  # 上金所跌破该价提醒
+THRESHOLD = 900.0  # 银行小金条跌破该价提醒
 BASE = "https://mp.68gold.cn"
 STATE = "gold_state.json"
 HTML = "index.html"
@@ -56,6 +56,7 @@ def main():
         try: state = json.load(open(STATE))
         except Exception: pass
     prev = state.get("prices", {})
+    prev_data_time = state.get("data_time", "")
     data_time = d.get("时间", "")
     prices = d.get("价格", {})
     cur, rows, md = {}, [], []
@@ -99,14 +100,15 @@ def main():
 
     # 微信推送：数据有更新才播报；跌破/收复提醒始终发送
     if SCT_KEY:
-        if data_time and data_time == state.get("data_time") and not alerts:
+        if data_time and data_time == prev_data_time and not alerts:
             print("数据无更新（休市），跳过本次播报")
         else:
             body_md = f"### 小黄鱼金价监控\n\n数据时间 {data_time}\n\n" + "\n\n".join(md)
             if diff_txt: body_md += f"\n\n溢价(vs上金所)：{diff_txt}"
             if alerts:
                 body_md = "\n\n".join(alerts) + "\n\n---\n\n" + body_md
-                serverchan("⚠️ 金价跌破900提醒", body_md)
+                title = "✅ 金价收复900" if any("收复" in a for a in alerts) else "⚠️ 金价跌破900提醒"
+                serverchan(title, body_md)
             else:
                 serverchan("金价播报 " + time.strftime("%m-%d %H:%M"), body_md)
 
