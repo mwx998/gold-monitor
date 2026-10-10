@@ -100,7 +100,10 @@ def main():
 
     # 微信推送：数据有更新才播报；跌破/收复提醒始终发送
     if SCT_KEY:
-        if data_time and data_time == prev_data_time and not alerts:
+        is_weekend = time.localtime().tm_wday >= 5  # 周六日休市不播报
+        if (is_weekend or (data_time and data_time == prev_data_time)) and not alerts:
+            reason = "周末休市" if is_weekend else "数据无更新"
+            print(f"{reason}，跳过本次播报")
             print("数据无更新（休市），跳过本次播报")
         else:
             body_md = f"### 小黄鱼金价监控\n\n数据时间 {data_time}\n\n" + "\n\n".join(md)
