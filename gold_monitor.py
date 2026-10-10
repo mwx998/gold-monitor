@@ -76,7 +76,7 @@ def main():
         md.append(f"{label}: **{v:.2f}** 元/克{delta}")
     diff = d.get("价差", {})
     diff_txt = ", ".join(f"{k.replace('_SGE','')} +{v:.2f}" for k, v in diff.items())
-    state.update({"ts": time.time(), "prices": cur, "data_time": data_time, "below": any_below})
+    state.update({"ts": time.time(), "prices": cur, "data_time": data_time})
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
     print(f"数据时间 {d.get('时间','')}")
@@ -93,6 +93,9 @@ def main():
                 alerts.append(f"⚠️ {label} 现价 **{v:.2f}** 元/克，已跌破 {THRESHOLD:.0f} 元/克！")
     elif was_below and not any_below:
         alerts.append(f"✅ 银行小金条价格已收复 {THRESHOLD:.0f} 元/克。")
+
+    state["below"] = any_below
+    json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
     # 微信推送：数据有更新才播报；跌破/收复提醒始终发送
     if SCT_KEY:
