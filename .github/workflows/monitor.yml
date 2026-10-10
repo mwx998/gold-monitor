@@ -18,6 +18,7 @@ jobs:
       - name: Fetch prices
         env:
           GOLD_TOKEN: ${{ secrets.GOLD_TOKEN }}
+          SERVERCHAN_KEY: ${{ secrets.SERVERCHAN_KEY }}
         run: python gold_monitor.py
       - name: Commit state & report
         run: |
