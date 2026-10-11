@@ -48,6 +48,10 @@ def main():
         if e.code in (401, 403):
             serverchan("🔴 金价监控令牌过期", "接口返回 %d，需要重新用 Fiddler 抓包换新令牌，否则监控已停摆。" % e.code)
             sys.exit(1)
+        serverchan("🔴 金价监控异常", "接口返回 HTTP %d，本次运行失败，下小时自动重试。" % e.code)
+        raise
+    except Exception as e:
+        serverchan("🔴 金价监控异常", "脚本出错：%s\n本次运行失败，下小时自动重试；连续失败请检查。" % e)
         raise
     d = raw["data"]
     prev = {}
@@ -100,11 +104,10 @@ def main():
 
     # 微信推送：数据有更新才播报；跌破/收复提醒始终发送
     if SCT_KEY:
-        is_weekend = time.localtime().tm_wday >= 5  # 周六日休市不播报
+        is_weekend = time.gmtime(time.time() + 8*3600).tm_wday >= 5  # 北京时间的周六日休市不播报
         if (is_weekend or (data_time and data_time == prev_data_time)) and not alerts:
             reason = "周末休市" if is_weekend else "数据无更新"
             print(f"{reason}，跳过本次播报")
-            print("数据无更新（休市），跳过本次播报")
         else:
             body_md = f"### 小黄鱼金价监控\n\n数据时间 {data_time}\n\n" + "\n\n".join(md)
             if diff_txt: body_md += f"\n\n溢价(vs上金所)：{diff_txt}"
@@ -123,7 +126,8 @@ def main():
     if os.path.exists("history.json"):
         try: history = json.load(open("history.json"))
         except Exception: pass
-    history.append({"time": d.get("时间",""), "prices": cur, "alerts": bool(alerts)})
+    if not history or history[-1].get("time") != d.get("时间",""):
+        history.append({"time": d.get("时间",""), "prices": cur, "alerts": bool(alerts)})
     history = history[-2000:]
     json.dump(history, open("history.json","w"), ensure_ascii=False)
     labels = [r[0] for r in rows]
