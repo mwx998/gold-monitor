@@ -71,6 +71,8 @@ def main():
         else:
             v = node.get("值"); label = cname
         if v is None: continue
+        try: v = float(v)
+        except (TypeError, ValueError): continue
         cur[label] = v
         delta = ""
         if label in prev and abs(prev[label]-v) > 1e-9:
@@ -81,6 +83,12 @@ def main():
         md.append(f"{label}: **{v:.2f}** 元/克{delta}")
     diff = d.get("价差", {})
     diff_txt = ", ".join(f"{k.replace('_SGE','')} +{v:.2f}" for k, v in diff.items())
+    if not cur:
+        # 接口返回200但无价格数据（数据源异常）：保持原状态，不发推送，避免误报收复
+        print("⚠️ 接口未返回任何价格数据（数据源异常），本次跳过")
+        state["ts"] = time.time()
+        json.dump(state, open(STATE, "w"), ensure_ascii=False)
+        return
     state.update({"ts": time.time(), "prices": cur, "data_time": data_time})
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
