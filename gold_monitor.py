@@ -18,6 +18,7 @@ STATE = "gold_state.json"
 HTML = "index.html"
 HISTORY = "history.json"
 DAILY_BROADCAST_LIMIT = 4  # 免费版5条/天, 预留1条给事件提醒
+BROADCAST_HOURS = {9, 12, 15, 18, 21}  # 播报时段（北京时间），均分全天额度
 
 BANK_PREFIX = ("工商", "建设", "交通", "招商")
 SHOW = [("ICBC","工商银行","5g"),("CCB","建设银行","5g"),("BCM","交通银行","10g"),
@@ -157,7 +158,7 @@ def main():
     if pushes.get("date") != today:
         pushes = {"date": today, "n": 0}
 
-    data_unchanged = (not data_time) or data_time == prev_data_time
+    price_changed = cur != prev
     if alerts:
         body_md = "\n\n".join(alerts) + "\n\n---\n\n### 小黄鱼金价监控\n\n数据时间 " + data_time + "\n\n" + "\n\n".join(md)
         if diff_txt:
@@ -167,8 +168,10 @@ def main():
         pushes["n"] += 1
     elif is_weekend:
         print("周末休市，跳过本次播报")
-    elif data_unchanged:
-        print("数据无更新，跳过本次播报")
+    elif not price_changed:
+        print("价格无变化，跳过本次播报")
+    elif bj.tm_hour not in BROADCAST_HOURS:
+        print(f"非播报时段（{sorted(BROADCAST_HOURS)} 点整点播报），跳过")
     elif pushes.get("n", 0) >= DAILY_BROADCAST_LIMIT:
         print(f"今日播报已达上限 {DAILY_BROADCAST_LIMIT} 条（省额度），网页仍每小时更新")
     else:
