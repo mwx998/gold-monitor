@@ -166,20 +166,8 @@ def main():
         title = "✅ 金价收复900" if any("收复" in a for a in alerts) else "⚠️ 金价跌破900提醒"
         serverchan(title, body_md)
         pushes["n"] += 1
-    elif is_weekend:
-        print("周末休市，跳过本次播报")
-    elif not price_changed:
-        print("价格无变化，跳过本次播报")
-    elif bj.tm_hour not in BROADCAST_HOURS:
-        print(f"非播报时段（{sorted(BROADCAST_HOURS)} 点整点播报），跳过")
-    elif pushes.get("n", 0) >= DAILY_BROADCAST_LIMIT:
-        print(f"今日播报已达上限 {DAILY_BROADCAST_LIMIT} 条（省额度），网页仍每小时更新")
     else:
-        body_md = f"### 小黄鱼金价监控\n\n数据时间 {data_time}\n\n" + "\n\n".join(md)
-        if diff_txt:
-            body_md += "\n\n溢价(vs上金所)：" + diff_txt
-        serverchan("金价播报 " + time.strftime("%m-%d %H:%M", bj), body_md)
-        pushes["n"] += 1
+        print("非事件提醒，跳过推送（仅跌破/收复900时提醒）")
     state["pushes"] = pushes
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
