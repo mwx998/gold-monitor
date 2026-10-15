@@ -189,7 +189,7 @@ def main():
     hist_rows = "\n".join(
         "<tr><td>%s</td>%s</tr>" % (h["time"], "".join(
             "<td>%s</td>" % h["prices"].get(l, "-") for l in labels))
-        for h in history[-48:])
+        for h in reversed(history[-48:]))
     head = "".join(f"<th>{l}</th>" for l in labels)
     alert_banner = ('<div style="background:#5c1a1a;border:1px solid #ff6b6b;padding:12px;border-radius:8px;margin-bottom:16px">'
                     + "<br>".join(a.replace("**", "") for a in alerts) + "</div>") if alerts else ""
