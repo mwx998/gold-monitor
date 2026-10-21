@@ -137,7 +137,7 @@ def main():
     for label, v, delta, _ in rows:
         print(f"{label}: {v:.2f} {delta}")
 
-    # ── 4. 跌破/收复检测（穿越式提醒） ──
+    # ── 4. 跌破/收复检测 ──
     alerts = []
     any_below = any(v < THRESHOLD for l, v in cur.items() if l.startswith(BANK_PREFIX))
     was_below = state.get("below", False)
@@ -148,6 +148,31 @@ def main():
     elif was_below and not any_below:
         alerts.append(f"✅ 银行小金条价格已收复 {THRESHOLD:.0f} 元/克。")
     state["below"] = any_below
+
+    # 日内最低兜底：瞬时跌破（采样间隙漏掉）也能发现，每银行每天最多提醒一次
+    try:
+        daily = call_api("/api/miniprogram/statistics/daily").get("data", {}).get("today", {}).get("summary", {})
+        today = daily.get("ICBC", {}).get("5g", {}).get("high_time", "")[:10] or time.strftime("%Y-%m-%d", now_bj())
+        low_alerted = state.get("low_alerted", {})
+        if low_alerted.get("date") != today:
+            low_alerted = {"date": today, "banks": []}
+        for code, cname, spec in SHOW:
+            if not cname.startswith(BANK_PREFIX):
+                continue
+            info = (daily.get(code) or {}).get(spec) or {}
+            low = info.get("low")
+            if low is None:
+                continue
+            try: low = float(low)
+            except (TypeError, ValueError): continue
+            if low < THRESHOLD and code not in low_alerted["banks"]:
+                low_time = (info.get("low_time") or "")[11:16]
+                alerts.append(f"⚠️ {cname} {spec} 日内最低 **{low:.2f}** 元/克（{low_time}），已触及 {THRESHOLD:.0f} 下方！")
+                low_alerted["banks"].append(code)
+        state["low_alerted"] = low_alerted
+    except Exception as e:
+        print("日内统计获取失败（不影响主流程）:", e)
+
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
     # ── 5. 微信推送（额度管理：播报每日限量，事件提醒不受限） ──
@@ -163,7 +188,12 @@ def main():
         body_md = "\n\n".join(alerts) + "\n\n---\n\n### 小黄鱼金价监控\n\n数据时间 " + data_time + "\n\n" + "\n\n".join(md)
         if diff_txt:
             body_md += "\n\n溢价(vs上金所)：" + diff_txt
-        title = "✅ 金价收复900" if any("收复" in a for a in alerts) else "⚠️ 金价跌破900提醒"
+        if any("收复" in a for a in alerts):
+            title = "✅ 金价收复900"
+        elif all("日内最低" in a for a in alerts):
+            title = "⚠️ 金价盘中触及900下方"
+        else:
+            title = "⚠️ 金价跌破900提醒"
         serverchan(title, body_md)
         pushes["n"] += 1
     else:
