@@ -12,7 +12,7 @@ import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.
 
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
-THRESHOLD = 900.0          # 银行小金条跌破该价提醒
+THRESHOLD = 750.0          # 银行小金条跌破该价提醒
 BASE = "https://mp.68gold.cn"
 STATE = "gold_state.json"
 HTML = "index.html"
@@ -189,11 +189,11 @@ def main():
         if diff_txt:
             body_md += "\n\n溢价(vs上金所)：" + diff_txt
         if any("收复" in a for a in alerts):
-            title = "✅ 金价收复900"
+            title = f"✅ 金价收复{THRESHOLD:.0f}"
         elif all("日内最低" in a for a in alerts):
-            title = "⚠️ 金价盘中触及900下方"
+            title = f"⚠️ 金价盘中触及{THRESHOLD:.0f}下方"
         else:
-            title = "⚠️ 金价跌破900提醒"
+            title = f"⚠️ 金价跌破{THRESHOLD:.0f}提醒"
         serverchan(title, body_md)
         pushes["n"] += 1
     else:
