@@ -8,7 +8,7 @@
 #   - 周末(北京时间)休市不播报; 数据时间未变化不播报; 数据时间缺失视为未更新
 #   - 跌破/收复只在穿越瞬间提醒; 数据源异常时保持状态不误报
 #   - 价格值类型防御; 令牌过期/接口异常主动微信通知
-import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.error, os, sys
+import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.error, os, sys, re
 
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
@@ -27,35 +27,42 @@ SHOW = [("ICBC","工商银行","5g"),("CCB","建设银行","5g"),("BCM","交通�
         ("FX678","伦敦黄金",None),("FX678","纽约黄金12",None)]
 UNIT = {"FX678": " 美元/盎司"}
 
-# 公开行情页补充银行（小黄鱼只收录工/建/交/招，这里补充中行/农行等）
-WEB_BANKS = [("中国银行","中行"),("农业银行","农行"),("邮政银行","邮储"),
-             ("中信银行","中信"),("兴业银行","兴业"),("平安银行","平安"),
-             ("民生银行","民生"),("中国黄金","中国黄金")]
-WEB_URL = "http://www.huangjinjiage.cn/golden/155283.html"
+# 补充银行实时行情（金投网 jijinhao 接口，银行牌价每日10:00左右定盘，盘中一般不再变）
+# 注：银行投资金条本身是每日定盘价（不同于上金所实时大盘），接口的 q3/q4 高低价对银行无意义
+JIJINHAO_CODES = {
+    "JO_78649": "中行金条", "JO_78650": "农行传世之宝", "JO_78656": "浦发投资金条",
+    "JO_78651": "邮储投资金条", "JO_94699": "中信投资金条", "JO_346542": "兴业投资金条",
+    "JO_346444": "平安和谐金条", "JO_346444_": "",  # 占位防错
+    "JO_351185": "民生投资金条", "JO_351236": "中国黄金投资金条",
+}
+JIJINHAO_URL = "https://api.jijinhao.com/quoteCenter/realTime.htm"
 
 def fetch_web_banks(retries=1):
-    """抓公开行情页补充银行投资金条价，返回 {显示名: 价格}，失败返回 {}"""
-    import re as _re
+    """拉取补充银行实时牌价，返回 {显示名: (价格, 更新时间HH:MM)}，失败返回 {}"""
+    codes = ",".join(k for k, v in JIJINHAO_CODES.items() if v)
     last = None
     for _ in range(retries + 1):
         try:
-            html = urllib.request.urlopen(
-                urllib.request.Request(WEB_URL, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}),
-                timeout=20).read().decode('utf8', 'replace')
+            req = urllib.request.Request(f"{JIJINHAO_URL}?codes={codes}",
+                headers={"User-Agent": "Mozilla/5.0", "Referer": "https://m.cngold.org/"})
+            raw = urllib.request.urlopen(req, timeout=20).read().decode('utf8', 'replace')
+            data = json.loads(re.search(r'quote_json\s*=\s*(\{.*\})', raw, re.S).group(1))
+            from datetime import datetime as _dt
             out = {}
-            for row in _re.findall(r'<tr[^>]*>(.*?)</tr>', html, _re.S):
-                cells = [_re.sub(r'<[^>]+>', '', c).strip() for c in _re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row, _re.S)]
-                if len(cells) >= 3:
-                    for full, short in WEB_BANKS:
-                        if cells[0] == full:
-                            m = _re.search(r'(\d{3}\.\d+)\s*元/克', cells[2])
-                            if m:
-                                out[f"{short}投资金条"] = float(m.group(1))
+            for code, short in JIJINHAO_CODES.items():
+                if not short: continue
+                q = data.get(code) or {}
+                v = q.get("q1")
+                if v is None: continue
+                try: v = float(v)
+                except (TypeError, ValueError): continue
+                t = _dt.fromtimestamp(q["time"]/1000).strftime("%H:%M") if q.get("time") else ""
+                out[short] = (v, t)
             return out
         except Exception as e:
             last = e
             time.sleep(3)
-    print("公开页补充行情抓取失败（不影响主监控）:", last)
+    print("补充行情抓取失败（不影响主监控）:", last)
     return {}
 
 def now_bj():
@@ -157,22 +164,19 @@ def main():
         rows.append((label, v, delta, "up" if "↑" in delta else ("down" if "↓" in delta else "")))
         md.append(f"{label}: **{v:.2f}**{delta}")
 
-    # 合并公开页补充银行（与小程序同口径的元/克）
+    # 合并补充银行（金投网牌价，含更新时间）
     web = fetch_web_banks()
-    for label, v in web.items():
-        if label not in cur:
-            cur[label] = v
     if web:
-        print("补充银行:", {k: v for k, v in web.items()})
-        # 补充品种加入展示行与微信正文（delta对比沿用 prev）
-        for label, v in web.items():
+        print("补充银行:", web)
+        for label, (v, vt) in web.items():
+            if label in cur: continue
+            cur[label] = v
             delta = ""
             if label in prev and abs(prev[label] - v) > 1e-9:
                 dd = v - prev[label]
                 delta = f"（{'↑' if dd > 0 else '↓'}{abs(dd):.2f}）"
-            rows.append((label, v, delta, "up" if "↑" in delta else ("down" if "↓" in delta else "")))
-            md.append(f"{label}: **{v:.2f}**{delta}")
-            state.setdefault("prices", {})
+            rows.append((f"{label}", v, f"（牌价{vt}）{delta}", "" if not delta else ("up" if "↑" in delta else "down")))
+            md.append(f"{label}: **{v:.2f}**（牌价{vt}）{delta}")
     if not cur:
         # 接口200但无价格数据（数据源异常）：保持原状态，不推送，防误报收复
         print("⚠️ 接口未返回任何价格数据（数据源异常），本次跳过")
