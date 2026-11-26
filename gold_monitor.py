@@ -164,8 +164,12 @@ def main():
         rows.append((label, v, delta, "up" if "↑" in delta else ("down" if "↓" in delta else "")))
         md.append(f"{label}: **{v:.2f}**{delta}")
 
-    # 合并补充银行（金投网牌价，含更新时间）
-    web = fetch_web_banks()
+    # 合并补充银行（金投网牌价，含更新时间）；失败不影响主监控
+    try:
+        web = fetch_web_banks()
+    except Exception as e:
+        print("补充行情异常（跳过）:", e)
+        web = {}
     if web:
         print("补充银行:", web)
         for label, (v, vt) in web.items():
@@ -272,18 +276,20 @@ def main():
                 ht = (info.get("high_time") or "")[11:16]
                 lt = (info.get("low_time") or "")[11:16]
                 lines_e.append(f"**{cname} {spec}**：最高 {hi:.2f}（{ht}）／ 最低 {lo:.2f}（{lt}）")
-            # 补充银行（每日定盘价，无日内高低，报当日牌价+更新时间）
+            # 补充银行（每日定盘价，无日内高低，报当日牌价+更新时间）；web 复用主流程抓取结果
             try:
-                web = fetch_web_banks()
                 if web:
                     lines_e.append("**其他银行牌价（每日定盘）**")
                     for short, (v, vt) in web.items():
                         lines_e.append(f"{short}：{v:.2f}（牌价{vt}）")
                     lines_e.append("")
+                else:
+                    lines_e.append("（其他银行牌价暂缺）")
             except Exception as e:
+                lines_e.append("（其他银行牌价暂缺）")
                 print("晚报补充行情失败（跳过该节）:", e)
             lines_e.append(f"数据时间 {data_time}")
-            serverchan("📊 每日金价回顾", "\n\n".join(lines_e))
+            serverchan(f"📊 每日金价回顾 {today[5:]}", "\n\n".join(lines_e))
             state["evening_date"] = today
         except Exception as e:
             print("晚间日报生成失败（下小时重试）:", e)
