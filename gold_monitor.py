@@ -31,7 +31,10 @@ def now_bj():
     """北京时间 struct_time（GitHub runner 是 UTC）"""
     return time.gmtime(time.time() + 8 * 3600)
 
-def call_api(path, token=TOKEN, method="GET", body="", retries=2):
+def call_api(path, token=None, method="GET", body="", retries=2):
+    token = token if token is not None else TOKEN
+    if not token:
+        raise RuntimeError("GOLD_TOKEN 未配置（环境变量缺失）")
     """带重试的接口调用；重试仍失败抛出最后一次异常"""
     last_exc = None
     for attempt in range(retries + 1):
