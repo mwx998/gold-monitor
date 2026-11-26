@@ -12,7 +12,7 @@ import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.
 
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
-THRESHOLD = 750.0          # 银行小金条跌破该价提醒
+THRESHOLD = 765.0          # 银行小金条跌破该价提醒
 BASE = "https://mp.68gold.cn"
 STATE = "gold_state.json"
 HTML = "index.html"
