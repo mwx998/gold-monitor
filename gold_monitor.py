@@ -13,6 +13,7 @@ import time, secrets, json, hashlib, hmac, urllib.request, urllib.parse, urllib.
 TOKEN = os.environ.get("GOLD_TOKEN", "")
 SCT_KEY = os.environ.get("SERVERCHAN_KEY", "")
 THRESHOLD = 765.0          # 银行小金条跌破该价提醒
+EVENING_REPORT = (21, 30)   # 每日21:30档播报当日高低价（北京时间，落在21:30后的首次运行执行）
 BASE = "https://mp.68gold.cn"
 STATE = "gold_state.json"
 HTML = "index.html"
@@ -196,8 +197,35 @@ def main():
             title = f"⚠️ 金价跌破{THRESHOLD:.0f}提醒"
         serverchan(title, body_md)
         pushes["n"] += 1
-    else:
-        print("非事件提醒，跳过推送（仅跌破/收复900时提醒）")
+    if (bj.tm_hour, bj.tm_min) >= EVENING_REPORT and not is_weekend \
+            and state.get("evening_date") != today:
+        # 每日21:30档：当日各银行最高价/最低价（带时间）
+        lines_e = ["### 每日金价回顾（当日高低）", ""]
+        try:
+            daily = call_api("/api/miniprogram/statistics/daily").get("data", {})
+            summ = (daily.get("today") or {}).get("summary") or {}
+            for code, cname, spec in SHOW:
+                if not cname.startswith(BANK_PREFIX):
+                    continue
+                info = (summ.get(code) or {}).get(spec) or {}
+                hi, lo = info.get("high"), info.get("low")
+                if hi is None or lo is None:
+                    continue
+                try:
+                    hi, lo = float(hi), float(lo)
+                except (TypeError, ValueError):
+                    continue
+                ht = (info.get("high_time") or "")[11:16]
+                lt = (info.get("low_time") or "")[11:16]
+                lines_e.append(f"**{cname} {spec}**：最高 {hi:.2f}（{ht}）／ 最低 {lo:.2f}（{lt}）")
+            lines_e.append("")
+            lines_e.append(f"数据时间 {data_time}")
+            serverchan("📊 每日金价回顾", "\n\n".join(lines_e))
+            state["evening_date"] = today
+        except Exception as e:
+            print("晚间日报生成失败（下小时重试）:", e)
+    if not alerts and (state.get("evening_date") == today or is_weekend or (bj.tm_hour, bj.tm_min) < EVENING_REPORT):
+        print("非事件提醒，跳过推送（仅跌破/收复765时提醒）")
     state["pushes"] = pushes
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
