@@ -21,11 +21,42 @@ HISTORY = "history.json"
 DAILY_BROADCAST_LIMIT = 4  # 免费版5条/天, 预留1条给事件提醒
 BROADCAST_HOURS = {9, 12, 15, 18, 21}  # 播报时段（北京时间），均分全天额度
 
-BANK_PREFIX = ("工商", "建设", "交通", "招商")
+BANK_PREFIX = ("工商", "建设", "交通", "招商", "中行", "农行", "邮储", "中信", "兴业", "平安", "民生", "中国黄金")
 SHOW = [("ICBC","工商银行","5g"),("CCB","建设银行","5g"),("BCM","交通银行","10g"),
         ("CMB","招商银行","10g"),("SGE","上金所","1g"),("HKGX","香港金银","1g"),
         ("FX678","伦敦黄金",None),("FX678","纽约黄金12",None)]
 UNIT = {"FX678": " 美元/盎司"}
+
+# 公开行情页补充银行（小黄鱼只收录工/建/交/招，这里补充中行/农行等）
+WEB_BANKS = [("中国银行","中行"),("农业银行","农行"),("邮政银行","邮储"),
+             ("中信银行","中信"),("兴业银行","兴业"),("平安银行","平安"),
+             ("民生银行","民生"),("中国黄金","中国黄金")]
+WEB_URL = "http://www.huangjinjiage.cn/golden/155283.html"
+
+def fetch_web_banks(retries=1):
+    """抓公开行情页补充银行投资金条价，返回 {显示名: 价格}，失败返回 {}"""
+    import re as _re
+    last = None
+    for _ in range(retries + 1):
+        try:
+            html = urllib.request.urlopen(
+                urllib.request.Request(WEB_URL, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}),
+                timeout=20).read().decode('utf8', 'replace')
+            out = {}
+            for row in _re.findall(r'<tr[^>]*>(.*?)</tr>', html, _re.S):
+                cells = [_re.sub(r'<[^>]+>', '', c).strip() for c in _re.findall(r'<t[dh][^>]*>(.*?)</t[dh]>', row, _re.S)]
+                if len(cells) >= 3:
+                    for full, short in WEB_BANKS:
+                        if cells[0] == full:
+                            m = _re.search(r'(\d{3}\.\d+)\s*元/克', cells[2])
+                            if m:
+                                out[f"{short}投资金条"] = float(m.group(1))
+            return out
+        except Exception as e:
+            last = e
+            time.sleep(3)
+    print("公开页补充行情抓取失败（不影响主监控）:", last)
+    return {}
 
 def now_bj():
     """北京时间 struct_time（GitHub runner 是 UTC）"""
@@ -126,6 +157,22 @@ def main():
         rows.append((label, v, delta, "up" if "↑" in delta else ("down" if "↓" in delta else "")))
         md.append(f"{label}: **{v:.2f}**{delta}")
 
+    # 合并公开页补充银行（与小程序同口径的元/克）
+    web = fetch_web_banks()
+    for label, v in web.items():
+        if label not in cur:
+            cur[label] = v
+    if web:
+        print("补充银行:", {k: v for k, v in web.items()})
+        # 补充品种加入展示行与微信正文（delta对比沿用 prev）
+        for label, v in web.items():
+            delta = ""
+            if label in prev and abs(prev[label] - v) > 1e-9:
+                dd = v - prev[label]
+                delta = f"（{'↑' if dd > 0 else '↓'}{abs(dd):.2f}）"
+            rows.append((label, v, delta, "up" if "↑" in delta else ("down" if "↓" in delta else "")))
+            md.append(f"{label}: **{v:.2f}**{delta}")
+            state.setdefault("prices", {})
     if not cur:
         # 接口200但无价格数据（数据源异常）：保持原状态，不推送，防误报收复
         print("⚠️ 接口未返回任何价格数据（数据源异常），本次跳过")
