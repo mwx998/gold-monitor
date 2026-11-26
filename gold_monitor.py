@@ -272,7 +272,16 @@ def main():
                 ht = (info.get("high_time") or "")[11:16]
                 lt = (info.get("low_time") or "")[11:16]
                 lines_e.append(f"**{cname} {spec}**：最高 {hi:.2f}（{ht}）／ 最低 {lo:.2f}（{lt}）")
-            lines_e.append("")
+            # 补充银行（每日定盘价，无日内高低，报当日牌价+更新时间）
+            try:
+                web = fetch_web_banks()
+                if web:
+                    lines_e.append("**其他银行牌价（每日定盘）**")
+                    for short, (v, vt) in web.items():
+                        lines_e.append(f"{short}：{v:.2f}（牌价{vt}）")
+                    lines_e.append("")
+            except Exception as e:
+                print("晚报补充行情失败（跳过该节）:", e)
             lines_e.append(f"数据时间 {data_time}")
             serverchan("📊 每日金价回顾", "\n\n".join(lines_e))
             state["evening_date"] = today
