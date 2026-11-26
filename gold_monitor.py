@@ -18,8 +18,6 @@ BASE = "https://mp.68gold.cn"
 STATE = "gold_state.json"
 HTML = "index.html"
 HISTORY = "history.json"
-DAILY_BROADCAST_LIMIT = 4  # 免费版5条/天, 预留1条给事件提醒
-BROADCAST_HOURS = {9, 12, 15, 18, 21}  # 播报时段（北京时间），均分全天额度
 
 BANK_PREFIX = ("工商", "建设", "交通", "招商", "中行", "农行", "邮储", "中信", "兴业", "平安", "民生", "浦发", "中国黄金")
 SHOW = [("ICBC","工商银行","5g"),("CCB","建设银行","5g"),("BCM","交通银行","10g"),
@@ -198,15 +196,36 @@ def main():
 
     # ── 4. 跌破/收复检测 ──
     alerts = []
-    any_below = any(v < THRESHOLD for l, v in cur.items() if l.startswith(BANK_PREFIX))
+    bj = now_bj()
+    is_weekend = bj.tm_wday >= 5
+    today = time.strftime("%Y-%m-%d", bj)
+    realtime_banks = {f"{cn} {sp}" for _, cn, sp in SHOW if cn.startswith(BANK_PREFIX)}
+    any_below = any(v < THRESHOLD for l, v in cur.items() if l in realtime_banks)
     was_below = state.get("below", False)
     if any_below and not was_below:
         for label, v in cur.items():
-            if label.startswith(BANK_PREFIX) and v < THRESHOLD:
+            if label in realtime_banks and v < THRESHOLD:
                 alerts.append(f"⚠️ {label} 现价 **{v:.2f}** 元/克，已跌破 {THRESHOLD:.0f} 元/克！")
     elif was_below and not any_below:
         alerts.append(f"✅ 银行小金条价格已收复 {THRESHOLD:.0f} 元/克。")
     state["below"] = any_below
+
+    # 补充银行（每日定盘价）跌破检测：定盘价<765 → 每银行每天提醒一次
+    try:
+        fixed_alerted = state.get("fixed_alerted", {})
+        fx_today = fixed_alerted.get("date") == today
+        for label, v in cur.items():
+            if label in realtime_banks or label in ("上金所 1g", "香港金银 1g"):
+                continue
+            if v < THRESHOLD and label not in (fixed_alerted.get("banks") or []):
+                if not fx_today:
+                    fixed_alerted = {"date": today, "banks": []}
+                    fx_today = True
+                alerts.append(f"⚠️ {label} 牌价 **{v:.2f}** 元/克，低于 {THRESHOLD:.0f}！")
+                fixed_alerted["banks"].append(label)
+        state["fixed_alerted"] = fixed_alerted
+    except Exception as e:
+        print("补充银行跌破检测异常:", e)
 
     # 日内最低兜底：瞬时跌破（采样间隙漏掉）也能发现，每银行每天最多提醒一次
     try:
@@ -234,14 +253,7 @@ def main():
 
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
-    # ── 5. 微信推送（额度管理：播报每日限量，事件提醒不受限） ──
-    bj = now_bj()
-    is_weekend = bj.tm_wday >= 5
-    today = time.strftime("%Y-%m-%d", bj)
-    pushes = state.get("pushes", {})
-    if pushes.get("date") != today:
-        pushes = {"date": today, "n": 0}
-
+    # ── 5. 微信推送 ──
     price_changed = cur != prev
     if alerts:
         body_md = "\n\n".join(alerts) + "\n\n---\n\n### 小黄鱼金价监控\n\n数据时间 " + data_time + "\n\n" + "\n\n".join(md)
@@ -254,7 +266,6 @@ def main():
         else:
             title = f"⚠️ 金价跌破{THRESHOLD:.0f}提醒"
         serverchan(title, body_md)
-        pushes["n"] += 1
     if (bj.tm_hour, bj.tm_min) >= EVENING_REPORT and not is_weekend \
             and state.get("evening_date") != today:
         # 每日21:30档：当日各银行最高价/最低价（带时间）
@@ -289,13 +300,14 @@ def main():
                 lines_e.append("（其他银行牌价暂缺）")
                 print("晚报补充行情失败（跳过该节）:", e)
             lines_e.append(f"数据时间 {data_time}")
-            serverchan(f"📊 每日金价回顾 {today[5:]}", "\n\n".join(lines_e))
-            state["evening_date"] = today
+            if serverchan(f"📊 每日金价回顾 {today[5:]}", "\n\n".join(lines_e)):
+                state["evening_date"] = today  # 推送成功才标记，失败下小时重试
+            else:
+                print("日报推送失败，下小时重试")
         except Exception as e:
             print("晚间日报生成失败（下小时重试）:", e)
     if not alerts and (state.get("evening_date") == today or is_weekend or (bj.tm_hour, bj.tm_min) < EVENING_REPORT):
         print("非事件提醒，跳过推送（仅跌破/收复765时提醒）")
-    state["pushes"] = pushes
     json.dump(state, open(STATE, "w"), ensure_ascii=False)
 
     # ── 6. 网页报告 ──
@@ -333,7 +345,7 @@ tr:nth-child(even){{background:#1a1a1a}}.up{{color:#ff6b6b}}.down{{color:#51cf66
 .scroll{{overflow-x:auto}}
 </style></head><body>
 <h1><span class="gold">◆</span> 小黄鱼数据工坊 · 金价监控</h1>
-<div class="time">数据时间：{data_time} ｜ 每小时自动更新；微信播报每日{DAILY_BROADCAST_LIMIT}条，跌破/收复随时提醒</div>
+<div class="time">数据时间：{data_time} ｜ 每15分钟检测；跌破/收复765微信提醒，每日21:30晚报</div>
 {alert_banner}
 <table><tr><th>品种</th><th>价格</th><th>变化</th></tr>{trs}</table>
 <h1 style="font-size:16px">近期走势（最近48次采集）</h1>
