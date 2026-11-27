@@ -30,7 +30,7 @@ UNIT = {"FX678": " 美元/盎司"}
 JIJINHAO_CODES = {
     "JO_78649": "中行金条", "JO_78650": "农行传世之宝", "JO_78656": "浦发投资金条",
     "JO_78651": "邮储投资金条", "JO_94699": "中信投资金条", "JO_346542": "兴业投资金条",
-    "JO_346444": "平安和谐金条", "JO_346444_": "",  # 占位防错
+    "JO_346444": "平安和谐金条",
     "JO_351185": "民生投资金条", "JO_351236": "中国黄金投资金条",
 }
 JIJINHAO_URL = "https://api.jijinhao.com/quoteCenter/realTime.htm"
@@ -51,13 +51,18 @@ def fetch_web_banks(retries=1):
                 if not short: continue
                 q = data.get(code) or {}
                 v = q.get("q1")
+                # 今日价未定盘(q1=0/缺失)时用昨收q2兜底，并标注日期以免误解为今日价
+                is_prev = False
+                if v is None or (isinstance(v,(int,float)) and float(v)==0):
+                    v = q.get("q2")
+                    is_prev = True
                 if v is None: continue
                 try: v = float(v)
                 except (TypeError, ValueError): continue
-                if not (100 < v < 2000):  # 牌价合理范围，过滤0/异常值
+                if not (100 < v < 2000):  # 合理范围
                     continue
                 t = _dt.fromtimestamp(q["time"]/1000).strftime("%H:%M") if q.get("time") else ""
-                out[short] = (v, t)
+                out[short] = (v, ("昨收 " if is_prev else "") + t)
             return out
         except Exception as e:
             last = e
@@ -172,11 +177,14 @@ def main():
     except Exception as e:
         print("补充行情异常（跳过）:", e)
         web = {}
+    stale_labels = set()  # 用昨收兜底的品种（非今日价，不参与跌破判断，仅展示）
     if web:
         print("补充银行:", web)
         for label, (v, vt) in web.items():
             if label in cur: continue
             cur[label] = v
+            if vt.startswith("昨收"):
+                stale_labels.add(label)
             delta = ""
             if label in prev and abs(prev[label] - v) > 1e-9:
                 dd = v - prev[label]
@@ -219,7 +227,7 @@ def main():
         fixed_alerted = state.get("fixed_alerted", {})
         fx_today = fixed_alerted.get("date") == today
         for label, v in cur.items():
-            if label in realtime_banks or label in ("上金所 1g", "香港金银 1g"):
+            if label in realtime_banks or label in ("上金所 1g", "香港金银 1g") or label in stale_labels:
                 continue
             if not (100 < v < 2000):
                 continue
