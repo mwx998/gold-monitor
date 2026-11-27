@@ -54,6 +54,8 @@ def fetch_web_banks(retries=1):
                 if v is None: continue
                 try: v = float(v)
                 except (TypeError, ValueError): continue
+                if not (100 < v < 2000):  # 牌价合理范围，过滤0/异常值
+                    continue
                 t = _dt.fromtimestamp(q["time"]/1000).strftime("%H:%M") if q.get("time") else ""
                 out[short] = (v, t)
             return out
@@ -154,6 +156,8 @@ def main():
             v = float(v)
         except (TypeError, ValueError):
             continue
+        if not (100 < v < 2000):
+            continue
         cur[label] = v
         delta = ""
         if label in prev and abs(prev[label] - v) > 1e-9:
@@ -217,6 +221,8 @@ def main():
         for label, v in cur.items():
             if label in realtime_banks or label in ("上金所 1g", "香港金银 1g"):
                 continue
+            if not (100 < v < 2000):
+                continue
             if v < THRESHOLD and label not in (fixed_alerted.get("banks") or []):
                 if not fx_today:
                     fixed_alerted = {"date": today, "banks": []}
@@ -243,6 +249,8 @@ def main():
                 continue
             try: low = float(low)
             except (TypeError, ValueError): continue
+            if not (100 < low < 2000):
+                continue
             if low < THRESHOLD and code not in low_alerted["banks"]:
                 low_time = (info.get("low_time") or "")[11:16]
                 alerts.append(f"⚠️ {cname} {spec} 日内最低 **{low:.2f}** 元/克（{low_time}），已触及 {THRESHOLD:.0f} 下方！")
